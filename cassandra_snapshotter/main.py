@@ -21,10 +21,14 @@ def run_backup(args):
     if args.password:
         env.password = args.password
 
+    if args.sshkey:
+        env.key_filename = args.sshkey
+
     if args.sshport:
         env.port = args.sshport
 
     env.hosts = args.hosts.split(',')
+    env.keyspaces = args.keyspaces.split(',') if args.keyspaces else None
 
     if args.new_snapshot:
         create_snapshot = True
@@ -37,7 +41,7 @@ def run_backup(args):
             get_s3_connection_host(args.s3_bucket_region)
         ).get_snapshot_for(
             hosts=env.hosts,
-            keyspaces=args.keyspaces,
+            keyspaces=env.keyspaces,
             table=args.table
         )
         create_snapshot = existing_snapshot is None
@@ -54,7 +58,8 @@ def run_backup(args):
         backup_schema=args.backup_schema,
         buffer_size=args.buffer_size,
         use_sudo=args.use_sudo,
-        connection_pool_size=args.connection_pool_size
+        connection_pool_size=args.connection_pool_size,
+        exclude_tables=args.exclude_tables
     )
 
     if create_snapshot:
@@ -63,7 +68,7 @@ def run_backup(args):
             base_path=args.s3_base_path,
             s3_bucket=args.s3_bucket_name,
             hosts=env.hosts,
-            keyspaces=args.keyspaces,
+            keyspaces=env.keyspaces,
             table=args.table
         )
         worker.snapshot(snapshot)
@@ -110,7 +115,9 @@ def restore_backup(args):
 
     worker = RestoreWorker(aws_access_key_id=args.aws_access_key_id,
                            aws_secret_access_key=args.aws_secret_access_key,
-                           snapshot=snapshot)
+                           snapshot=snapshot,
+                           cassandra_bin_dir=args.cassandra_bin_dir,
+                           cassandra_data_dir=args.cassandra_data_dir)
 
     if args.hosts:
         hosts = args.hosts.split(',')
@@ -139,14 +146,19 @@ def main():
         help="The buffer size (MB) for compress and upload")
 
     backup_parser.add_argument(
+        '--exclude-tables',
+        default='',
+        help="Column families you want to skip")
+
+    backup_parser.add_argument(
         '--hosts',
         required=True,
-        help="The comma separated list of hosts to snapshot")
+        help="Comma separated list of hosts to snapshot")
 
     backup_parser.add_argument(
         '--keyspaces',
         default='',
-        help="The keyspaces to backup (omit to backup all)")
+        help="Comma separated list of keyspaces to backup (omit to backup all)")
 
     backup_parser.add_argument(
         '--table',
@@ -185,6 +197,10 @@ def main():
         '--password',
         default='',
         help="User password to connect with hosts")
+
+    backup_parser.add_argument(
+        '--sshkey',
+        help="The file containing the private ssh key to use to connect with hosts")
 
     backup_parser.add_argument(
         '--new-snapshot',
@@ -231,6 +247,16 @@ def main():
         '--target-hosts',
         required=True,
         help="The comma separated list of hosts to restore into")
+
+    restore_parser.add_argument(
+        '--cassandra-bin-dir',
+        default='/usr/bin',
+        help="cassandra binaries directory")
+
+    restore_parser.add_argument(
+        '--cassandra-data-dir',
+        default='/usr/local/cassandra/data',
+        help="cassandra data directory")
 
     args = base_parser.parse_args()
     subcommand = args.subcommand
